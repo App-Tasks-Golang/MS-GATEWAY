@@ -1,0 +1,132 @@
+services:
+  task-db:
+    image: mysql:8.0  # Imagen oficial de MySQL
+    container_name: DB-TASK
+    environment:
+      MYSQL_ROOT_PASSWORD: ${TASK_PASSWORD}  # Contraseña para el usuario root
+      MYSQL_DATABASE: ${TASK_NAME}  # Nombre de la base de datos
+    ports:
+      - "3306:3306"  # Puerto de MySQL
+    volumes:
+      - mysql_task_data:/var/lib/mysql  # Persistencia de datos en el contenedor
+    networks:
+      - app_network  # Asegúrate de estar en la misma red
+  
+
+  user-db:
+    image: mysql:8.0  # Imagen oficial de MySQL
+    container_name: DB-USER
+    environment:
+      MYSQL_ROOT_PASSWORD: ${USER_PASSWORD}  # Contraseña para el usuario root
+      MYSQL_DATABASE: ${USER_NAME}  # Nombre de la base de datos
+    ports:
+      - "3307:3306"  # Puerto de MySQL (puedes cambiar el puerto de host si necesitas)
+    volumes:
+      - mysql_user_data:/var/lib/mysql  # Persistencia de datos en el contenedor
+    networks:
+      - app_network  # Asegúrate de estar en la misma red
+
+
+  auth-db:
+    image: mysql:8.0  # Imagen oficial de MySQL
+    container_name: DB-AUTH
+    environment:
+      MYSQL_ROOT_PASSWORD: ${AUTH_PASSWORD}  # Contraseña para el usuario root desde .env
+      MYSQL_DATABASE: ${AUTH_NAME}  # Nombre de la base de datos desde .env
+    ports:
+      - "3308:3306"  # Puerto del host 3307 mapeado al puerto 3306 del contenedor
+    volumes:
+      - mysql_auth_data:/var/lib/mysql  # Persistencia de datos
+    networks:
+      - app_network  # Asegúrate de que la app y la base de datos están en la misma red
+
+
+
+  user-service:
+    build:
+      context: ./../User-Service-Go
+      dockerfile: dockerfile
+    container_name: USER-SERVICE
+    environment:
+      - USER_ROOT=${USER_ROOT}
+      - USER_PASSWORD=${USER_PASSWORD}
+      - USER_HOST=${USER_HOST}
+      - USER_PORT=${USER_PORT}
+      - USER_NAME=${USER_NAME}
+    depends_on:
+      - user-db
+    ports:
+      - "8082:8082"  # Exponer el puerto de tu app Go si es necesario
+    networks:
+      - app_network  # Esta línea asegura que la app está en la misma red que MySQL
+    restart: always
+
+
+  task-service:
+    build:
+      context: ./../Task-Service-Go  # Ruta hacia el microservicio de Task-Service
+      dockerfile: dockerfile
+    container_name: TASK-SERVICE
+    environment:
+      - TASK_ROOT=${TASK_ROOT}
+      - TASK_PASSWORD=${TASK_PASSWORD}
+      - TASK_HOST=${TASK_HOST}
+      - TASK_PORT=${TASK_PORT}
+      - TASK_NAME=${TASK_NAME}
+    depends_on:
+      - task-db
+    ports:
+      - "8080:8080"  # Exponer el puerto de tu app Go si es necesario
+    networks:
+      - app_network  # Esta línea asegura que la app está en la misma red que MySQL
+    restart: always
+
+
+
+  auth-service:
+    build:
+      context: ./../OAuth-Service-Go
+      dockerfile: dockerfile  # Asegúrate de que el Dockerfile esté bien configurado
+    container_name: AUTH-SERVICE
+    environment:
+      - AUTH_ROOT=${AUTH_ROOT}  # Usuario de MySQL desde .env
+      - AUTH_PASSWORD=${AUTH_PASSWORD}  # Contraseña de MySQL desde .env
+      - AUTH_HOST=${AUTH_HOST}  # Host de la base de datos
+      - AUTH_PORT=${AUTH_PORT}  # Puerto de la base de datos
+      - AUTH_NAME=${AUTH_NAME}  # Nombre de la base de datos
+    depends_on:
+      - auth-db
+    ports:
+      - "8084:8084"  # Exponer el puerto de tu app Go
+    networks:
+      - app_network  # Esta línea asegura que la app está en la misma red que MySQL
+    restart: always
+
+
+  api-gateway:
+    build:
+      context: .  # Ruta hacia el microservicio del API Gateway
+      dockerfile: dockerfile
+    container_name: API-GATEWAY
+    environment:
+      - TASK_SERVICE_URL=http://task-service:8080  # URL del microservicio Task-Service
+      - USER_SERVICE_URL=http://user-service:8082
+      - AUTH_SERVICE_URL=http://auth-service:8084
+    ports:
+      - "8083:8083"  # Puerto donde el API Gateway escucha las solicitudes
+    networks:
+      - app_network  # Conexión al mismo network que los otros servicios
+    depends_on:
+      - task-service
+      - user-service
+      - auth-service
+    restart: always
+
+volumes:
+  mysql_task_data:
+  mysql_user_data:
+  mysql_auth_data:
+
+networks:
+  app_network:
+    driver: bridge  # Definir que la red es de tipo bridge
